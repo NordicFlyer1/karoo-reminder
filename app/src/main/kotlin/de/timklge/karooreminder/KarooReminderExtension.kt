@@ -22,12 +22,14 @@ import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.ClosedReceiveChannelException
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.filterNot
 import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.coroutines.launch
@@ -36,6 +38,7 @@ import kotlinx.serialization.json.Json
 enum class ReminderTrigger(val id: String, val label: String) {
     ELAPSED_TIME("elapsed_time", "Elapsed Time"),
     DISTANCE("distance", "Distance"),
+    ENERGY_OUTPUT("energy_output", "Energy Output"),
     HR_LIMIT_MAXIMUM_EXCEEDED("hr_limit_max", "HR above value"),
     HR_LIMIT_MINIMUM_EXCEEDED("hr_limit_min", "HR below value"),
     POWER_LIMIT_MAXIMUM_EXCEEDED("power_limit_min", "Power above value"),
@@ -50,6 +53,7 @@ enum class ReminderTrigger(val id: String, val label: String) {
             HR_LIMIT_MINIMUM_EXCEEDED, POWER_LIMIT_MINIMUM_EXCEEDED, SPEED_LIMIT_MINIMUM_EXCEEDED, CADENCE_LIMIT_MINIMUM_EXCEEDED -> "<"
             HR_LIMIT_MAXIMUM_EXCEEDED, POWER_LIMIT_MAXIMUM_EXCEEDED, SPEED_LIMIT_MAXIMUM_EXCEEDED, CADENCE_LIMIT_MAXIMUM_EXCEEDED -> ">"
             ELAPSED_TIME, DISTANCE -> ""
+            ENERGY_OUTPUT -> ""
         }
     }
 
@@ -61,11 +65,30 @@ enum class ReminderTrigger(val id: String, val label: String) {
             POWER_LIMIT_MAXIMUM_EXCEEDED, POWER_LIMIT_MINIMUM_EXCEEDED -> "W"
             SPEED_LIMIT_MAXIMUM_EXCEEDED, SPEED_LIMIT_MINIMUM_EXCEEDED -> if(imperial) "mph" else "km/h"
             CADENCE_LIMIT_MAXIMUM_EXCEEDED, CADENCE_LIMIT_MINIMUM_EXCEEDED -> "rpm"
+            ENERGY_OUTPUT -> "kJ"
         }
     }
 }
 
-class KarooReminderExtension : KarooExtension("karoo-reminder", "1.1.2") {
+fun Flow<Int>.allIntermediateInts(): Flow<Int> = flow {
+    var lastValue: Int? = null
+
+    collect { value ->
+        if (lastValue != null){
+            val start = (lastValue!! + 1).coerceAtMost(value)
+
+            for (i in start..value) {
+                emit(i)
+            }
+        } else {
+            emit(value)
+        }
+
+        lastValue = value
+    }
+}
+
+class KarooReminderExtension : KarooExtension("karoo-reminder", "1.1.3") {
 
     companion object {
         const val TAG = "karoo-reminder"
@@ -229,6 +252,46 @@ class KarooReminderExtension : KarooExtension("karoo-reminder", "1.1.2") {
                 }
         }
         jobs.add(elapsedTimeJob)
+
+        val energyOutputJob = CoroutineScope(Dispatchers.IO).launch {
+            val preferences = applicationContext.dataStore.data.map { remindersJson ->
+                try {
+                    Json.decodeFromString<MutableList<Reminder>>(
+                        remindersJson[preferencesKey] ?: defaultReminders
+                    )
+                } catch(e: Throwable){
+                    Log.e(TAG,"Failed to read preferences", e)
+                    mutableListOf()
+                }
+            }
+
+            karooSystem.streamDataFlow(DataType.Type.ENERGY_OUTPUT)
+                .mapNotNull { (it as? StreamState.Streaming)?.dataPoint?.singleValue  }
+                .map { it.toInt() }
+                .distinctUntilChanged()
+                .filterNot { it == 0 }
+                .allIntermediateInts()
+                .combine(preferences) { energyOutput, reminders -> energyOutput to reminders}
+                .distinctUntilChanged { old, new -> old.first == new.first }
+                .collectLatest { (energyOutput, reminders) ->
+                    val rs = reminders
+                        .filter { reminder -> reminder.trigger == ReminderTrigger.ENERGY_OUTPUT && reminder.isActive && energyOutput % reminder.interval == 0 }
+
+                    for (reminder in rs){
+                        Log.i(TAG, "Energy output reminder: ${reminder.name}")
+                        reminderChannel.send(DisplayedReminder(reminder.tone, ReminderTrigger.ENERGY_OUTPUT, InRideAlert(
+                            id = "reminder-${reminder.id}-${energyOutput}",
+                            detail = reminder.text,
+                            title = reminder.name,
+                            autoDismissMs = if(reminder.isAutoDismiss) reminder.autoDismissSeconds * 1000L else null,
+                            icon = R.drawable.timer,
+                            textColor = reminder.displayForegroundColor?.getTextColor() ?: R.color.black,
+                            backgroundColor = reminder.displayForegroundColor?.colorRes ?: R.color.hRed
+                        )))
+                    }
+                }
+        }
+        jobs.add(energyOutputJob)
     }
 
     data class StreamData(val value: Double, val reminders: MutableList<Reminder>? = null, val imperial: Boolean = false)
@@ -251,7 +314,7 @@ class KarooReminderExtension : KarooExtension("karoo-reminder", "1.1.2") {
                 ReminderTrigger.POWER_LIMIT_MAXIMUM_EXCEEDED, ReminderTrigger.POWER_LIMIT_MINIMUM_EXCEEDED -> DataType.Type.SMOOTHED_3S_AVERAGE_POWER
                 ReminderTrigger.SPEED_LIMIT_MAXIMUM_EXCEEDED, ReminderTrigger.SPEED_LIMIT_MINIMUM_EXCEEDED -> DataType.Type.SMOOTHED_3S_AVERAGE_SPEED
                 ReminderTrigger.CADENCE_LIMIT_MAXIMUM_EXCEEDED, ReminderTrigger.CADENCE_LIMIT_MINIMUM_EXCEEDED -> DataType.Type.SMOOTHED_3S_AVERAGE_CADENCE
-                ReminderTrigger.DISTANCE, ReminderTrigger.ELAPSED_TIME -> error("Unsupported trigger type: $triggerType")
+                ReminderTrigger.DISTANCE, ReminderTrigger.ELAPSED_TIME, ReminderTrigger.ENERGY_OUTPUT -> error("Unsupported trigger type: $triggerType")
             }
 
             karooSystem.streamDataFlow(dataType)
@@ -277,7 +340,7 @@ class KarooReminderExtension : KarooExtension("karoo-reminder", "1.1.2") {
                             ReminderTrigger.HR_LIMIT_MINIMUM_EXCEEDED, ReminderTrigger.POWER_LIMIT_MINIMUM_EXCEEDED,
                             ReminderTrigger.CADENCE_LIMIT_MINIMUM_EXCEEDED, ReminderTrigger.SPEED_LIMIT_MINIMUM_EXCEEDED -> value < reminderValue
 
-                            ReminderTrigger.DISTANCE, ReminderTrigger.ELAPSED_TIME -> error("Unsupported trigger type: $triggerType")
+                            else -> error("Unsupported trigger type: $triggerType")
                         }
 
                         reminder.isActive && reminder.trigger == triggerType && triggerIsMet
