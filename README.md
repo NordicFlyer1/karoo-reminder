@@ -13,9 +13,9 @@ Karoo extension that displays in-ride alerts based on custom triggers. Reminders
 
 ## Installation
 
-If you are using a Karoo 3, you can use [Hammerhead's sideloading procedure](https://support.hammerhead.io/hc/en-us/articles/31576497036827-Companion-App-Sideloading) to install the app:
+If you are using a Karoo 3,  you can use [Hammerhead's sideloading procedure](https://support.hammerhead.io/hc/en-us/articles/31576497036827-Companion-App-Sideloading) to install the app:
 
-1. Open the [releases page](https://github.com/timklge/karoo-reminder/releases) on your phone's browser, long-press the `app-release.apk` link and share it with the Hammerhead Companion app.
+1. Long-press [this download link](https://github.com/timklge/karoo-reminder/releases/latest/download/app-release.apk) and share it with the Hammerhead Companion app.
 2. Your karoo should show an info screen about the app now. Press "Install".
 
 If you are using a Karoo 2, you can use manual sideloading:
