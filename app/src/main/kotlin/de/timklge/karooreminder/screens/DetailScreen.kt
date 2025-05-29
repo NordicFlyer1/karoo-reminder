@@ -18,6 +18,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
@@ -25,6 +26,7 @@ import androidx.compose.material.icons.filled.Done
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
@@ -103,6 +105,8 @@ fun DetailScreen(isCreating: Boolean, reminder: Reminder, onSubmit: (updatedRemi
     var selectedTone by remember { mutableStateOf(reminder.tone) }
     var autoDismissSeconds by remember { mutableStateOf(reminder.autoDismissSeconds.toString()) }
     var selectedTrigger by remember { mutableStateOf(reminder.trigger) }
+    var rideProfileDialogVisible by remember { mutableStateOf(false) }
+    var enabledRideProfiles by remember { mutableStateOf(reminder.enabledRideProfiles.toMutableSet()) }
 
     val profile by karooSystem.streamUserProfile().collectAsStateWithLifecycle(null)
 
@@ -116,7 +120,8 @@ fun DetailScreen(isCreating: Boolean, reminder: Reminder, onSubmit: (updatedRemi
             isActive = isActive,
             smoothSetting = smoothSetting,
             trigger = selectedTrigger,
-            isAutoDismiss = autoDismiss, tone = selectedTone, autoDismissSeconds = autoDismissSeconds.toIntOrNull() ?: 15)
+            isAutoDismiss = autoDismiss, tone = selectedTone, autoDismissSeconds = autoDismissSeconds.toIntOrNull() ?: 15,
+            enabledRideProfiles = enabledRideProfiles.toSet())
     }
 
     Column(modifier = Modifier
@@ -259,6 +264,41 @@ fun DetailScreen(isCreating: Boolean, reminder: Reminder, onSubmit: (updatedRemi
                 )
             }
 
+            Column(modifier = Modifier.fillMaxWidth()) {
+                if (enabledRideProfiles.isEmpty()) {
+                    Text("Enabled for all profiles")
+                } else {
+                    Text("Enabled for profiles:")
+
+                    enabledRideProfiles.forEach { profileName ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(profileName)
+                            FilledTonalButton(onClick = {
+                                enabledRideProfiles = enabledRideProfiles.toMutableSet().apply { remove(profileName) }
+                            }) {
+                                Icon(Icons.Default.Delete, contentDescription = "Delete profile")
+                            }
+                        }
+                    }
+                }
+            }
+
+            FilledTonalButton(modifier = Modifier
+                .fillMaxWidth()
+                .height(60.dp), onClick = {
+                rideProfileDialogVisible = true
+            }) {
+                Icon(Icons.Default.Build, contentDescription = "Change Profiles", modifier = Modifier.size(20.dp))
+                Spacer(modifier = Modifier.width(5.dp))
+                Text("Limit to Profile")
+            }
+
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Switch(checked = isActive, onCheckedChange = { isActive = it})
                 Spacer(modifier = Modifier.width(10.dp))
@@ -310,6 +350,59 @@ fun DetailScreen(isCreating: Boolean, reminder: Reminder, onSubmit: (updatedRemi
                 title = { Text("Delete reminder") }, text = { Text("Really delete this reminder?") })
             }
 
+            if (rideProfileDialogVisible) {
+                var newProfileName by remember { mutableStateOf("") }
+                Dialog(onDismissRequest = { rideProfileDialogVisible = false }) {
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(10.dp),
+                        shape = RoundedCornerShape(10.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .padding(16.dp)
+                                .fillMaxWidth(),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+
+                            OutlinedTextField(
+                                value = newProfileName,
+                                onValueChange = { newProfileName = it },
+                                label = { Text("New profile name") },
+                                modifier = Modifier.fillMaxWidth(),
+                                singleLine = true
+                            )
+                            FilledTonalButton(
+                                onClick = {
+                                    if (newProfileName.isNotBlank()) {
+                                        enabledRideProfiles = enabledRideProfiles.toMutableSet().apply { add(newProfileName) }
+                                        newProfileName = ""
+                                        rideProfileDialogVisible = false
+                                    }
+                                },
+                                modifier = Modifier.fillMaxWidth().height(60.dp)
+                            ) {
+                                Icon(Icons.Default.Add, contentDescription = "Add Profile")
+                                Spacer(modifier = Modifier.width(5.dp))
+                                Text("Add Profile")
+                            }
+
+                            FilledTonalButton(
+                                onClick = { rideProfileDialogVisible = false },
+                                modifier = Modifier.fillMaxWidth().height(60.dp)
+                            ) {
+                                Icon(Icons.Default.Close, contentDescription = "Cancel Editing")
+                                Spacer(modifier = Modifier.width(5.dp))
+                                Text("Close")
+                            }
+                        }
+                    }
+                }
+            }
+
             if (triggerDialogVisible){
                 Dialog(onDismissRequest = { triggerDialogVisible = false }) {
                     Card(
@@ -317,6 +410,7 @@ fun DetailScreen(isCreating: Boolean, reminder: Reminder, onSubmit: (updatedRemi
                             .fillMaxWidth()
                             .padding(10.dp),
                         shape = RoundedCornerShape(10.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
                     ) {
                         Column(modifier = Modifier
                             .padding(5.dp)
@@ -361,6 +455,7 @@ fun DetailScreen(isCreating: Boolean, reminder: Reminder, onSubmit: (updatedRemi
                             .fillMaxWidth()
                             .padding(10.dp),
                         shape = RoundedCornerShape(10.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
                     ) {
                         Column(modifier = Modifier
                             .padding(5.dp)
@@ -396,6 +491,7 @@ fun DetailScreen(isCreating: Boolean, reminder: Reminder, onSubmit: (updatedRemi
                             .fillMaxWidth()
                             .padding(10.dp),
                         shape = RoundedCornerShape(10.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
                     ) {
                         Column(modifier = Modifier
                             .padding(5.dp)
@@ -430,3 +526,4 @@ fun DetailScreen(isCreating: Boolean, reminder: Reminder, onSubmit: (updatedRemi
         }
     }
 }
+
